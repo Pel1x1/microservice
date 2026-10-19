@@ -11,7 +11,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        service: [inventory-service, order-service]
+        service: [user-service, store-service, catalog-service, inventory-service, order-service, payment-service, delivery-service, review-service]
     services:
       postgres:
         image: postgres:16
@@ -52,7 +52,7 @@ jobs:
       packages: write
     strategy:
       matrix:
-        service: [inventory-service, order-service]
+        service: [user-service, store-service, catalog-service, inventory-service, order-service, payment-service, delivery-service, review-service]
     steps:
       - uses: actions/checkout@v4
       - name: Image name (GHCR требует нижний регистр)

@@ -1,5 +1,16 @@
-# Маркетплейс автозапчастей: inventory-service + order-service
+# Маркетплейс автозапчастей: восемь микросервисов (user, store, catalog, inventory, order, payment, delivery, review)
 # Запуск: docker compose up --build
+# База данных на каждый сервис (database per service), общий брокер RabbitMQ
+x-postgres: &postgres
+  image: postgres:16
+  environment:
+    POSTGRES_PASSWORD: password
+  healthcheck:
+    test: pg_isready -U postgres
+    interval: 5s
+    timeout: 5s
+    retries: 10
+
 services:
   rabbitmq:
     image: rabbitmq:3-management
@@ -13,28 +24,14 @@ services:
       retries: 10
 
   inventory-db:
-    image: postgres:16
-    environment:
-      POSTGRES_PASSWORD: password
+    <<: *postgres
     volumes:
       - inventory_data:/var/lib/postgresql/data
-    healthcheck:
-      test: pg_isready -U postgres
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
   order-db:
-    image: postgres:16
-    environment:
-      POSTGRES_PASSWORD: password
+    <<: *postgres
     volumes:
       - order_data:/var/lib/postgresql/data
-    healthcheck:
-      test: pg_isready -U postgres
-      interval: 5s
-      timeout: 5s
-      retries: 10
 
   inventory-service:
     build: ./inventory-service
@@ -65,6 +62,126 @@ services:
       inventory-service:
         condition: service_started
 
+  user-db:
+    <<: *postgres
+    volumes:
+      - user_data:/var/lib/postgresql/data
+
+  user-service:
+    build: ./user-service
+    ports:
+      - 8003:80
+    environment:
+      POSTGRES_URL: postgresql://postgres:password@user-db:5432/postgres
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      user-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  store-db:
+    <<: *postgres
+    volumes:
+      - store_data:/var/lib/postgresql/data
+
+  store-service:
+    build: ./store-service
+    ports:
+      - 8004:80
+    environment:
+      POSTGRES_URL: postgresql://postgres:password@store-db:5432/postgres
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      store-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  catalog-db:
+    <<: *postgres
+    volumes:
+      - catalog_data:/var/lib/postgresql/data
+
+  catalog-service:
+    build: ./catalog-service
+    ports:
+      - 8005:80
+    environment:
+      POSTGRES_URL: postgresql://postgres:password@catalog-db:5432/postgres
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+      STORE_URL: http://store-service:80
+    depends_on:
+      catalog-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      store-service:
+        condition: service_started
+
+  payment-db:
+    <<: *postgres
+    volumes:
+      - payment_data:/var/lib/postgresql/data
+
+  payment-service:
+    build: ./payment-service
+    ports:
+      - 8006:80
+    environment:
+      POSTGRES_URL: postgresql://postgres:password@payment-db:5432/postgres
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      payment-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  delivery-db:
+    <<: *postgres
+    volumes:
+      - delivery_data:/var/lib/postgresql/data
+
+  delivery-service:
+    build: ./delivery-service
+    ports:
+      - 8007:80
+    environment:
+      POSTGRES_URL: postgresql://postgres:password@delivery-db:5432/postgres
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      delivery-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  review-db:
+    <<: *postgres
+    volumes:
+      - review_data:/var/lib/postgresql/data
+
+  review-service:
+    build: ./review-service
+    ports:
+      - 8008:80
+    environment:
+      POSTGRES_URL: postgresql://postgres:password@review-db:5432/postgres
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+      ORDER_URL: http://order-service:80
+    depends_on:
+      review-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      order-service:
+        condition: service_started
+
 volumes:
   inventory_data:
   order_data:
+  user_data:
+  store_data:
+  catalog_data:
+  payment_data:
+  delivery_data:
+  review_data:
