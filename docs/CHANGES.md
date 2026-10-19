@@ -79,6 +79,8 @@
 | 5.4 | Exchanges: обменник задания 2, тип и Durable |
 | 5.5 | Queues после `docker restart rabbitmq` |
 
+**ПР7 и ПР8** — рисунки 7.1–7.3, 8.1, 8.2 уже вставлены в отчёт, файлы в `docs/report/screenshots_pr7_8/` (рис. 8.1 — вывод `gh run view`, не снимок вкладки Actions: репозиторий приватный). Исходный перечень, если снимать заново:
+
 **ПР7:**
 - `docker compose up --build`: запущенные контейнеры (`docker compose ps`);
 - Swagger inventory-service (http://localhost:8001/docs) и order-service (http://localhost:8002/docs);
@@ -89,3 +91,10 @@
 - вывод `pytest tests/unit -v` и `pytest tests/integration -v` для каждого сервиса;
 - вкладка Actions на GitHub: зелёный запуск с обоими job (`test`, `build-and-push`);
 - раздел Packages с опубликованными образами.
+
+## 6. Известное ограничение (не исправлено)
+
+После перезапуска RabbitMQ (`docker restart`) consumer'ы `order-service` и `inventory-service` не восстанавливаются: в логе
+`RuntimeError: Connection ... closed` из `aio_pika.robust_channel.restore`, у очередей `ikbo-65-23_automarket_*` остаётся 0 consumer'ов,
+и события перестают обрабатываться, пока сервис не перезапущен (`docker compose restart inventory-service order-service`).
+В штатной работе без перезапуска брокера сценарий ПР7 проходит полностью. Публикация событий не затронута (соединение создаётся на каждое событие).
