@@ -4,22 +4,22 @@
 
 | Папка | Работа |
 |---|---|
-| `pr5-rabbitmq/` | ПР5: RabbitMQ, задания 1 и 2 (все три варианта, выбор аргументом) |
+| `pr5-rabbitmq/` | ПР5: RabbitMQ, задания 1 и 2: отдельное решение на каждого участника |
 | `inventory-service/` | ПР7: сервис остатков (PostgreSQL, RabbitMQ) |
 | `order-service/` | ПР7: сервис заказов (PostgreSQL, RabbitMQ, REST-вызов inventory-service) |
 | `docker-compose.yaml` | ПР7: запуск всей системы одной командой |
 | `*/tests/` + `.github/workflows/ci-cd.yml` | ПР8: unit- и интеграционные тесты, CI/CD |
 
 ## ПР5
+У каждого участника своё решение в `pr5-rabbitmq/<фамилия>/` (подробности и таблица вариантов —
+в `pr5-rabbitmq/README.md`).
 ```bash
 cd pr5-rabbitmq && pip install -r requirements.txt
-# Задание 1 (вариант 1|2|3)
-python task1/consumer.py 2
-python task1/producer.py 2 "Заказ создан"
-# Задание 2 (вариант 1|2|3), можно запустить несколько consumer
-cd task2
-python consumer.py 3
-python producer.py 3 pricelist.brakes.update "Обновление цен ----"
+cd kiselev                              # или nachinkin / gidayatov / soshnin
+python task1/consumer.py                # терминал 1
+python task1/producer.py                # терминал 2
+python task2/consumer.py                # воркер, можно запустить несколько
+python task2/producer.py review.seller.recalc "Пересчёт рейтинга продавца 42 ---"
 ```
 По умолчанию используется учебный сервер 51.250.26.59 (guest/guest123).
 Для локального брокера: `RABBIT_HOST=localhost RABBIT_PASSWORD=guest`.
