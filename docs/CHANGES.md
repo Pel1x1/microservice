@@ -15,6 +15,11 @@
 | `README.md` | Раздел ПР5 переписан под новую структуру | Старые команды (`python task1/consumer.py 2`) больше не работают |
 | `docs/report/pr5_<фамилия>.md` (4 шт.) | Созданы заготовки разделов отчёта по ПР5 с листингами и списком скриншотов | Раздел 3.4 ТЗ |
 | `docs/CHANGES.md` | Этот файл | Раздел 8 ТЗ |
+| `user-service/`, `store-service/`, `catalog-service/`, `payment-service/`, `delivery-service/`, `review-service/` | **Созданы** шесть недостающих сервисов из ПР4 по той же архитектуре, что order/inventory (модели, схемы, репозитории base/local/db, сервис, роутер, Dockerfile, тесты) | В ПР4 восемь контекстов, а были реализованы два |
+| `docker-compose.yaml` | Теперь 17 контейнеров: 8 сервисов, 8 PostgreSQL (database per service), RabbitMQ; порты 8001–8008 | Запуск всей системы одной командой |
+| `.github/workflows/ci-cd.yml` | Матрица `test` и `build-and-push` расширена до 8 сервисов | Тесты и образы всех сервисов |
+| `tools/e2e_check.py` | Создан: сквозная проверка всей цепочки (44 проверки) | Заменяет ручной сценарий с `publish_event.py` |
+| `README.md` | Раздел ПР7 переписан (таблица портов, сценарий) | Актуализация |
 
 **Код сервисов (`order-service`, `inventory-service`), тесты, Dockerfile, `docker-compose.yaml`, `requirements*.txt`
 и `tools/publish_event.py` исправлений не потребовали**: все 65 тестов и сценарий README прошли с первого запуска.
@@ -47,13 +52,27 @@
 - Замечание для текста отчёта: при ручной проверке в zsh ID заказа с двоеточием нужно писать как `"${ORDER_ID}:assemble"` (без фигурных скобок zsh портит URL).
 
 **ПР8.**
-- Число тестов не изменилось: 65 (order-service 7 + 16 unit, 7 интеграционных; inventory-service 8 + 18 unit, 9 интеграционных).
+- Число тестов: **231** (160 unit и 71 интеграционный). Было 65 для двух сервисов; добавлено 166 тестов для шести новых сервисов.
 - Библиотеки: pytest 8.3.4, FastAPI 0.115.6, pydantic 2.10.4, SQLAlchemy 2.0.36, psycopg2-binary 2.9.10, aio-pika 9.5.4, pika 1.3.2.
 - Состав CI описан в таблице выше; шаги CI дополнительно прогнаны в чистом контейнере `python:3.12`.
 
 **ПР5.** Результаты проверки каждого участника — в `pr5-rabbitmq/<фамилия>/run_log.txt` (итог: nachinkin 6/6, gidayatov 7/7, kiselev 7/7, soshnin 6/6).
 
 ## 3. Итог `pytest`
+
+| Сервис | Unit: модели | Unit: сервис | Интеграционные | Всего |
+|---|---|---|---|---|
+| user-service | 7 | 10 | 10 | 27 |
+| store-service | 5 | 13 | 8 | 26 |
+| catalog-service | 6 | 14 | 9 | 29 |
+| inventory-service | 8 | 18 | 9 | 35 |
+| order-service | 7 | 16 | 7 | 30 |
+| payment-service | 5 | 14 | 10 | 29 |
+| delivery-service | 4 | 10 | 10 | 24 |
+| review-service | 8 | 15 | 8 | 31 |
+| **Итого** | 50 | 110 | 71 | **231** |
+
+Старая сводка по двум сервисам (до добавления остальных):
 
 | Сервис | Unit | Интеграционные |
 |---|---|---|
@@ -65,7 +84,7 @@
 ## 4. Репозиторий и CI
 
 - Репозиторий: https://github.com/Pel1x1/microservice (приватный).
-- Статус CI: **success** — https://github.com/Pel1x1/microservice/actions/runs/39265602950 (jobs `test` по обоим сервисам и `build-and-push`).
+- Статус CI: **success** — https://github.com/Pel1x1/microservice/actions/runs/39290507374 (16 jobs: `test` и `build-and-push` для всех восьми сервисов).
 
 ## 5. Скриншоты для отчёта
 
@@ -98,3 +117,12 @@
 `RuntimeError: Connection ... closed` из `aio_pika.robust_channel.restore`, у очередей `ikbo-65-23_automarket_*` остаётся 0 consumer'ов,
 и события перестают обрабатываться, пока сервис не перезапущен (`docker compose restart inventory-service order-service`).
 В штатной работе без перезапуска брокера сценарий ПР7 проходит полностью. Публикация событий не затронута (соединение создаётся на каждое событие).
+
+## 7. Отклонения от ПР4, о которых нужно знать
+
+- **Базы данных.** В ПР4 для catalog-service предложены MongoDB + Elasticsearch, для inventory-service — PostgreSQL + Redis, для review-service — MongoDB.
+  В реализации все восемь сервисов используют PostgreSQL: список совместимости запчасти хранится в JSON-колонке, поиск по каталогу и расчёт рейтинга выполняются
+  в приложении. Это указано в тексте ПР7 отчёта.
+- **Брокер.** Вместо Kafka из ПР4 используется RabbitMQ (как и требует курс).
+- **Внешние системы.** Эквайринг и служба доставки эмулируются командами payment-service (`:confirm`, `:fail`) и delivery-service (`:ship`, `:deliver`).
+- **Авторизация** в сервисах не реализована (в описании API указаны роли, но токены не проверяются).
