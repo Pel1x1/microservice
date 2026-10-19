@@ -1,0 +1,70 @@
+# Маркетплейс автозапчастей: inventory-service + order-service
+# Запуск: docker compose up --build
+services:
+  rabbitmq:
+    image: rabbitmq:3-management
+    ports:
+      - 5672:5672       # AMQP
+      - 15672:15672     # веб-интерфейс (guest / guest)
+    healthcheck:
+      test: rabbitmq-diagnostics -q ping
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  inventory-db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: password
+    volumes:
+      - inventory_data:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -U postgres
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  order-db:
+    image: postgres:16
+    environment:
+      POSTGRES_PASSWORD: password
+    volumes:
+      - order_data:/var/lib/postgresql/data
+    healthcheck:
+      test: pg_isready -U postgres
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  inventory-service:
+    build: ./inventory-service
+    ports:
+      - 8001:80
+    environment:
+      POSTGRES_URL: postgresql://postgres:password@inventory-db:5432/postgres
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+    depends_on:
+      inventory-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+
+  order-service:
+    build: ./order-service
+    ports:
+      - 8002:80
+    environment:
+      POSTGRES_URL: postgresql://postgres:password@order-db:5432/postgres
+      AMQP_URL: amqp://guest:guest@rabbitmq:5672/
+      INVENTORY_URL: http://inventory-service:80
+    depends_on:
+      order-db:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+      inventory-service:
+        condition: service_started
+
+volumes:
+  inventory_data:
+  order_data:

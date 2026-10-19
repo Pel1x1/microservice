@@ -1,0 +1,71 @@
+# ПР8: CI/CD — unit- и интеграционные тесты, затем публикация образов в GHCR
+name: CI/CD
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        service: [inventory-service, order-service]
+    services:
+      postgres:
+        image: postgres:16
+        env:
+          POSTGRES_PASSWORD: password
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+    defaults:
+      run:
+        working-directory: ${{ matrix.service }}
+    env:
+      POSTGRES_URL: postgresql://postgres:password@localhost:5432/postgres
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+          cache: pip
+          cache-dependency-path: ${{ matrix.service }}/requirements*.txt
+      - run: pip install -r requirements-dev.txt
+      - name: Unit tests
+        run: pytest tests/unit -v
+      - name: Integration tests
+        run: pytest tests/integration -v
+
+  build-and-push:
+    # образы публикуются только после успешных тестов и только при push
+    needs: test
+    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      packages: write
+    strategy:
+      matrix:
+        service: [inventory-service, order-service]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Image name (GHCR требует нижний регистр)
+        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.service }}" >> "$GITHUB_ENV"
+      - uses: docker/login-action@v3
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+      - uses: docker/build-push-action@v6
+        with:
+          context: ${{ matrix.service }}
+          push: true
+          tags: |
+            ${{ env.IMAGE }}:latest
+            ${{ env.IMAGE }}:${{ github.sha }}
