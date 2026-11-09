@@ -109,7 +109,11 @@ jobs:
         run: python tools/observability_check.py
       - name: Service logs on failure
         if: failure()
-        run: docker compose ps && docker compose logs --tail 80
+        run: |
+          docker compose ps
+          docker compose logs --no-color rabbitmq | tail -40
+          docker compose logs --no-color user-service store-service catalog-service inventory-service \
+            order-service payment-service delivery-service review-service
       - name: Stop system
         if: always()
         run: docker compose down --volumes
