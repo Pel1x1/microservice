@@ -66,7 +66,9 @@ def check_metrics() -> None:
     check('Rate: http_requests_total по сервисам', len(rate) == 8, f'({len(rate)} сервисов)')
     errors = prom('sum(http_requests_total{job="automarket", status="4xx"})')
     check('Errors: ответы 4xx учтены', bool(errors) and float(errors[0]['value'][1]) > 0)
-    p95 = prom('histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job="automarket"}[5m])))')
+    # rate() нужны минимум две выборки после запросов — ждём следующего опроса
+    p95 = retry(lambda: prom('histogram_quantile(0.95, sum by (le) (rate(http_request_duration_seconds_bucket{job="automarket"}[5m])))'),
+                ready=lambda r: bool(r) and r[0]['value'][1] not in ('NaN', '0'))
     check('Duration: гистограмма времени ответа', bool(p95), f'(p95 = {float(p95[0]["value"][1]) * 1000:.1f} мс)' if p95 else '')
     events = retry(lambda: prom('sum by (routing_key) (automarket_events_published_total)'),
                    ready=lambda r: any(e['metric']['routing_key'] == 'order.created' for e in r))
