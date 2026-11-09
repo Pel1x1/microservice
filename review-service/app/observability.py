@@ -151,6 +151,9 @@ def setup_observability(app: FastAPI, service: str, engine: Engine) -> None:
         FastAPIInstrumentor.instrument_app(app, excluded_urls='metrics,health',
                                            exclude_spans=['receive', 'send'])  # без служебных ASGI-span'ов
 
-    Instrumentator(excluded_handlers=['/metrics', '/health']).instrument(app).expose(
-        app, include_in_schema=False)
+    # бакеты гистограммы времени ответа: сервисы отвечают за миллисекунды, а бакеты
+    # по умолчанию (0.1, 0.5, 1 с) не позволяют посчитать перцентили точнее 100 мс
+    Instrumentator(excluded_handlers=['/metrics', '/health']).instrument(
+        app, latency_lowr_buckets=(0.0025, 0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5),
+    ).expose(app, include_in_schema=False)
     logger.info(f'{service}: observability ready (tracing={"on" if tracing else "off"})')

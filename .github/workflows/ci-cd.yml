@@ -47,8 +47,8 @@ jobs:
     env:
       POSTGRES_URL: postgresql://postgres:password@localhost:5432/postgres
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
         with:
           python-version: '3.12'
           cache: pip
@@ -68,7 +68,7 @@ jobs:
       matrix:
         service: [user-service, store-service, catalog-service, inventory-service, order-service, payment-service, delivery-service, review-service]
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Build docker image
         working-directory: ${{ matrix.service }}
         run: |
@@ -79,7 +79,7 @@ jobs:
           docker image ls automarket/${{ matrix.service }}
           docker save automarket/${{ matrix.service }}:latest -o ${{ matrix.service }}.tar
       - name: Upload image artifact
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: image-${{ matrix.service }}
           path: ${{ matrix.service }}/${{ matrix.service }}.tar
@@ -90,9 +90,9 @@ jobs:
     needs: build
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
       - name: Download image artifacts
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           pattern: image-*
           path: images
@@ -132,13 +132,13 @@ jobs:
         service: [user-service, store-service, catalog-service, inventory-service, order-service, payment-service, delivery-service, review-service]
     steps:
       - name: Download image artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: image-${{ matrix.service }}
       - name: Load container image
         run: docker load --input ${{ matrix.service }}.tar
       - name: Log in to GHCR
-        uses: docker/login-action@v3
+        uses: docker/login-action@v4
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
@@ -173,7 +173,7 @@ jobs:
           fi
       - name: Download image artifact
         if: steps.secrets.outputs.ready == 'true'
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: image-order-service
       - name: Load container image
@@ -181,7 +181,7 @@ jobs:
         run: docker load --input order-service.tar
       - name: Log in to DockerHub
         if: steps.secrets.outputs.ready == 'true'
-        uses: docker/login-action@v3.0.0
+        uses: docker/login-action@v4
         with:
           username: ${{ secrets.DOCKER_USERNAME }}
           password: ${{ secrets.DOCKER_PASSWORD }}
@@ -203,13 +203,13 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - name: Download image artifact
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: image-user-service
       - name: Load container image
         run: docker load --input user-service.tar
       - name: Login to YC Registry
-        uses: docker/login-action@v3.0.0
+        uses: docker/login-action@v4
         with:
           registry: cr.yandex
           username: json_key
@@ -233,7 +233,7 @@ jobs:
     steps:
       - name: Deploy serverless container
         id: deploy
-        uses: yc-actions/yc-sls-container-deploy@v2
+        uses: yc-actions/yc-sls-container-deploy@v5
         with:
           yc-sa-json-credentials: ${{ secrets.YC_KEYS }}
           container-name: ${{ secrets.YC_CONTAINER_NAME }}
@@ -268,7 +268,7 @@ jobs:
     permissions:
       actions: write
     steps:
-      - uses: geekyeggo/delete-artifact@v5
+      - uses: geekyeggo/delete-artifact@v6
         with:
           name: image-*
           failOnError: false

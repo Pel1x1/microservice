@@ -218,7 +218,7 @@
             "type": "prometheus",
             "uid": "prometheus"
           },
-          "expr": "sum(rate(http_requests_total{job=\"automarket\", service=~\"$service\", status=\"5xx\"}[5m])) / clamp_min(sum(rate(http_requests_total{job=\"automarket\", service=~\"$service\"}[5m])), 1e-9)",
+          "expr": "(sum(rate(http_requests_total{job=\"automarket\", service=~\"$service\", status=\"5xx\"}[5m])) or vector(0)) / clamp_min(sum(rate(http_requests_total{job=\"automarket\", service=~\"$service\"}[5m])), 1e-9)",
           "instant": true
         }
       ],
