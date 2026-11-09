@@ -1,0 +1,39 @@
+# ПР10: источники данных Grafana создаются автоматически при старте
+apiVersion: 1
+
+datasources:
+  - name: Prometheus
+    uid: prometheus
+    type: prometheus
+    access: proxy
+    url: http://prometheus:9090
+    isDefault: true
+
+  - name: Loki
+    uid: loki
+    type: loki
+    access: proxy
+    url: http://loki:3100
+    jsonData:
+      # из JSON-лога по trace_id — переход к трассе в Jaeger
+      derivedFields:
+        - name: TraceID
+          matcherRegex: '"trace_id": "(\w+)"'
+          datasourceUid: jaeger
+          url: '$${__value.raw}'
+
+  - name: Jaeger
+    uid: jaeger
+    type: jaeger
+    access: proxy
+    url: http://jaeger:16686
+    jsonData:
+      # из трассы — к логам того же запроса в Loki
+      tracesToLogsV2:
+        datasourceUid: loki
+        filterByTraceID: true
+        spanStartTimeShift: '-5m'
+        spanEndTimeShift: '5m'
+        tags:
+          - key: service.name
+            value: service

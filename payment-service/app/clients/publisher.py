@@ -1,7 +1,12 @@
 import json
+import logging
 from abc import ABC, abstractmethod
 
 import pika
+
+from app.observability import EVENTS_PUBLISHED
+
+logger = logging.getLogger('automarket')
 
 
 class EventPublisher(ABC):
@@ -32,3 +37,5 @@ class RabbitPublisher(EventPublisher):
             )
         finally:
             connection.close()
+        EVENTS_PUBLISHED.labels(routing_key).inc()
+        logger.info(f'event {routing_key} published', extra={'routing_key': routing_key})

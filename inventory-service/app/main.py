@@ -1,9 +1,11 @@
+import logging
 from contextlib import asynccontextmanager
 
 from fastapi import FastAPI
 
 from app import rabbitmq
 from app.database import engine
+from app.observability import setup_observability
 from app.schemas.base_schema import Base
 from app.endpoints.stock_router import stock_router, reservation_router
 
@@ -15,12 +17,13 @@ async def lifespan(app: FastAPI):
     try:
         connection = await rabbitmq.consume()
     except Exception as e:  # HTTP API работает и без брокера
-        print(f'inventory-service: RabbitMQ is unavailable: {e}')
+        logging.getLogger('automarket').warning(f'RabbitMQ is unavailable: {e}')
     yield
     if connection is not None:
         await connection.close()
 
 
 app = FastAPI(title='Inventory Service', lifespan=lifespan)
+setup_observability(app, 'inventory-service', engine)  # ПР10: метрики, JSON-логи, трассировка
 app.include_router(stock_router, prefix='/api')
 app.include_router(reservation_router, prefix='/api')

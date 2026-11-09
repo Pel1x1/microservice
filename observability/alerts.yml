@@ -1,0 +1,48 @@
+# ПР10: правила оповещений (вкладка Alerts в Prometheus, http://localhost:9090/alerts)
+groups:
+  - name: automarket
+    rules:
+      - alert: ServiceDown
+        expr: up{job="automarket"} == 0
+        for: 30s
+        labels:
+          severity: critical
+        annotations:
+          summary: '{{ $labels.service }} не отвечает на /metrics'
+
+      - alert: HighErrorRate
+        # доля ответов 5xx больше 5% за последние 2 минуты (Errors из модели RED)
+        expr: |
+          sum by (service) (rate(http_requests_total{job="automarket", status="5xx"}[2m]))
+            / sum by (service) (rate(http_requests_total{job="automarket"}[2m])) > 0.05
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.service }}: {{ $value | humanizePercentage }} ответов 5xx'
+
+      - alert: SlowRequests
+        # 95-й перцентиль времени ответа больше 500 мс (Duration из модели RED)
+        expr: |
+          histogram_quantile(0.95,
+            sum by (le, service) (rate(http_request_duration_seconds_bucket{job="automarket"}[5m]))) > 0.5
+        for: 2m
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.service }}: p95 = {{ $value | humanizeDuration }}'
+
+      - alert: EventProcessingFailed
+        expr: increase(automarket_events_consumed_total{result="error"}[5m]) > 0
+        labels:
+          severity: warning
+        annotations:
+          summary: '{{ $labels.service }} не смог обработать событие {{ $labels.routing_key }}'
+
+      - alert: QueueBacklog
+        expr: rabbitmq_queue_messages_ready{queue=~"ikbo-65-23_automarket.*"} > 100
+        for: 1m
+        labels:
+          severity: warning
+        annotations:
+          summary: 'В очереди {{ $labels.queue }} копятся сообщения: {{ $value }}'

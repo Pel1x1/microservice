@@ -1,15 +1,18 @@
 import asyncio
 import json
-import traceback
+import logging
 from typing import Callable
 
 from aio_pika import connect_robust, ExchangeType
 from aio_pika.abc import AbstractIncomingMessage, AbstractRobustConnection
 
 from app.settings import settings
+from app.observability import EVENTS_CONSUMED
 from app.database import SessionLocal
 from app.dependencies import build_stock_service
 from app.services.stock_service import StockService
+
+logger = logging.getLogger('automarket')
 
 
 def _run_with_service(handler: Callable[[StockService, dict], None], payload: dict) -> None:
@@ -27,8 +30,11 @@ def _make_consumer(handler: Callable[[StockService, dict], None]):
                 payload = json.loads(msg.body.decode())
                 # синхронная работа с БД выполняется в отдельном потоке
                 await asyncio.to_thread(_run_with_service, handler, payload)
+                EVENTS_CONSUMED.labels(msg.routing_key, 'ok').inc()
+                logger.info(f'event {msg.routing_key} processed', extra={'routing_key': msg.routing_key})
             except Exception:
-                traceback.print_exc()
+                EVENTS_CONSUMED.labels(msg.routing_key, 'error').inc()
+                logger.exception(f'event {msg.routing_key} failed', extra={'routing_key': msg.routing_key})
                 raise
     return on_message
 
@@ -52,5 +58,5 @@ async def consume() -> AbstractRobustConnection:
         await queue.bind(exchange, routing_key=routing_key)
         await queue.consume(_make_consumer(handler))
 
-    print('inventory-service: started RabbitMQ consuming...')
+    logger.info(f'started RabbitMQ consuming: {", ".join(SUBSCRIPTIONS)}')
     return connection

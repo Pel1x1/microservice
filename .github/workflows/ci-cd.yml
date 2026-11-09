@@ -1,19 +1,36 @@
-# ПР8: CI/CD — unit- и интеграционные тесты, затем публикация образов в GHCR
+# ПР9: CI/CD конвейер маркетплейса автозапчастей
+#
+#   test ──► build ──► e2e ──┬─► push-ghcr        (все 8 сервисов → GitHub Container Registry)
+#  (8 шт.)  (8 шт.)          ├─► push-dockerhub   (order-service → DockerHub)            задание 2
+#                            └─► push-yc ─► deploy-yc (user-service → Yandex Cloud       задание 3
+#                                                      Container Registry → Serverless Container)
+#
+# CI (задание 1): unit- и интеграционные тесты, сборка образов всех сервисов, запуск всей
+# системы из собранных образов и сквозные тесты (tools/e2e_check.py, tools/observability_check.py).
+# CD: доставка только из main и только после всех тестов. Образ собирается один раз
+# и передаётся между работами как артефакт (docker save → upload-artifact → docker load).
 name: CI/CD
 
 on:
   push:
   pull_request:
+  workflow_dispatch:
+
+concurrency:   # новый push в ту же ветку отменяет устаревший запуск
+  group: ci-cd-${{ github.ref }}
+  cancel-in-progress: true
 
 jobs:
+  # ---------------- CI ----------------
   test:
+    name: test (${{ matrix.service }})
     runs-on: ubuntu-latest
     strategy:
       fail-fast: false
       matrix:
         service: [user-service, store-service, catalog-service, inventory-service, order-service, payment-service, delivery-service, review-service]
     services:
-      postgres:
+      postgres:            # БД для интеграционных тестов
         image: postgres:16
         env:
           POSTGRES_PASSWORD: password
@@ -36,16 +53,72 @@ jobs:
           python-version: '3.12'
           cache: pip
           cache-dependency-path: ${{ matrix.service }}/requirements*.txt
-      - run: pip install -r requirements-dev.txt
+      - name: Prepare tests
+        run: pip install -r requirements-dev.txt
       - name: Unit tests
         run: pytest tests/unit -v
       - name: Integration tests
         run: pytest tests/integration -v
 
-  build-and-push:
-    # образы публикуются только после успешных тестов и только при push
+  build:
+    name: build (${{ matrix.service }})
     needs: test
-    if: github.event_name == 'push'
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        service: [user-service, store-service, catalog-service, inventory-service, order-service, payment-service, delivery-service, review-service]
+    steps:
+      - uses: actions/checkout@v4
+      - name: Build docker image
+        working-directory: ${{ matrix.service }}
+        run: |
+          docker build . --file Dockerfile \
+            --label org.opencontainers.image.source=${{ github.server_url }}/${{ github.repository }} \
+            --label org.opencontainers.image.revision=${{ github.sha }} \
+            --tag automarket/${{ matrix.service }}:latest
+          docker image ls automarket/${{ matrix.service }}
+          docker save automarket/${{ matrix.service }}:latest -o ${{ matrix.service }}.tar
+      - name: Upload image artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: image-${{ matrix.service }}
+          path: ${{ matrix.service }}/${{ matrix.service }}.tar
+          retention-days: 1
+
+  e2e:
+    name: e2e (вся система из собранных образов)
+    needs: build
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - name: Download image artifacts
+        uses: actions/download-artifact@v4
+        with:
+          pattern: image-*
+          path: images
+          merge-multiple: true
+      - name: Load container images
+        run: |
+          for image in images/*.tar; do docker load --input "$image"; done
+          docker image ls 'automarket/*'
+      - name: Start system (8 services, 8 PostgreSQL, RabbitMQ, observability stack)
+        run: docker compose up --detach --no-build --wait --wait-timeout 300
+      - name: End-to-end test
+        run: python tools/e2e_check.py
+      - name: Observability test (Prometheus, Jaeger, Loki)
+        run: python tools/observability_check.py
+      - name: Service logs on failure
+        if: failure()
+        run: docker compose ps && docker compose logs --tail 80
+      - name: Stop system
+        if: always()
+        run: docker compose down --volumes
+
+  # ---------------- CD ----------------
+  push-ghcr:
+    name: push-ghcr (${{ matrix.service }})
+    needs: e2e
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     permissions:
       contents: read
@@ -54,18 +127,144 @@ jobs:
       matrix:
         service: [user-service, store-service, catalog-service, inventory-service, order-service, payment-service, delivery-service, review-service]
     steps:
-      - uses: actions/checkout@v4
-      - name: Image name (GHCR требует нижний регистр)
-        run: echo "IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.service }}" >> "$GITHUB_ENV"
-      - uses: docker/login-action@v3
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image-${{ matrix.service }}
+      - name: Load container image
+        run: docker load --input ${{ matrix.service }}.tar
+      - name: Log in to GHCR
+        uses: docker/login-action@v3
         with:
           registry: ghcr.io
           username: ${{ github.actor }}
           password: ${{ secrets.GITHUB_TOKEN }}
-      - uses: docker/build-push-action@v6
+      - name: Push tags to GHCR
+        run: |
+          IMAGE=ghcr.io/${GITHUB_REPOSITORY_OWNER,,}/${{ matrix.service }}   # GHCR требует нижний регистр
+          for tag in latest ${{ github.sha }}; do
+            docker tag automarket/${{ matrix.service }}:latest "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
+
+  push-dockerhub:
+    # Задание 2: доставка order-service в DockerHub
+    name: push-dockerhub (order-service)
+    needs: e2e
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    env:
+      DOCKER_USERNAME: ${{ secrets.DOCKER_USERNAME }}
+      HAS_PASSWORD: ${{ secrets.DOCKER_PASSWORD != '' }}
+      IMAGE_NAME: automarket-order-service
+    steps:
+      - name: Check secrets
+        id: secrets
+        run: |
+          if [ -z "$DOCKER_USERNAME" ] || [ "$HAS_PASSWORD" != "true" ]; then
+            echo "::warning::Секреты DOCKER_USERNAME/DOCKER_PASSWORD не заданы — доставка в DockerHub пропущена"
+            echo "ready=false" >> "$GITHUB_OUTPUT"
+          else
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+          fi
+      - name: Download image artifact
+        if: steps.secrets.outputs.ready == 'true'
+        uses: actions/download-artifact@v4
         with:
-          context: ${{ matrix.service }}
-          push: true
-          tags: |
-            ${{ env.IMAGE }}:latest
-            ${{ env.IMAGE }}:${{ github.sha }}
+          name: image-order-service
+      - name: Load container image
+        if: steps.secrets.outputs.ready == 'true'
+        run: docker load --input order-service.tar
+      - name: Log in to DockerHub
+        if: steps.secrets.outputs.ready == 'true'
+        uses: docker/login-action@v3.0.0
+        with:
+          username: ${{ secrets.DOCKER_USERNAME }}
+          password: ${{ secrets.DOCKER_PASSWORD }}
+      - name: Push tags to DockerHub
+        if: steps.secrets.outputs.ready == 'true'
+        run: |
+          for tag in latest ${GITHUB_SHA::7}; do
+            docker tag automarket/order-service:latest "$DOCKER_USERNAME/$IMAGE_NAME:$tag"
+            docker push "$DOCKER_USERNAME/$IMAGE_NAME:$tag"
+          done
+          echo "Образ: https://hub.docker.com/r/$DOCKER_USERNAME/$IMAGE_NAME" >> "$GITHUB_STEP_SUMMARY"
+
+  push-yc:
+    # Задание 3, шаг 1: доставка user-service в Container Registry Яндекс.Облака.
+    # Включается переменной репозитория YC_ENABLED=true, когда заведены секреты YC_* (см. deploy/yandex-cloud/README.md)
+    name: push-yc (user-service)
+    needs: e2e
+    if: github.event_name != 'pull_request' && github.ref == 'refs/heads/main' && vars.YC_ENABLED == 'true'
+    runs-on: ubuntu-latest
+    steps:
+      - name: Download image artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: image-user-service
+      - name: Load container image
+        run: docker load --input user-service.tar
+      - name: Login to YC Registry
+        uses: docker/login-action@v3.0.0
+        with:
+          registry: cr.yandex
+          username: json_key
+          password: ${{ secrets.YC_KEYS }}
+      - name: Push tag to YC Registry
+        run: |
+          IMAGE=cr.yandex/${{ secrets.YC_REGISTRY_ID }}/user-service
+          for tag in latest ${{ github.sha }}; do
+            docker tag automarket/user-service:latest "$IMAGE:$tag"
+            docker push "$IMAGE:$tag"
+          done
+
+  deploy-yc:
+    # Задание 3, шаг 2: новая ревизия бессерверного контейнера из образа текущего коммита
+    name: deploy-yc (Serverless Container)
+    needs: push-yc
+    runs-on: ubuntu-latest
+    environment:
+      name: yandex-cloud
+      url: https://${{ steps.deploy.outputs.id }}.containers.yandexcloud.net/docs
+    steps:
+      - name: Deploy serverless container
+        id: deploy
+        uses: yc-actions/yc-sls-container-deploy@v2
+        with:
+          yc-sa-json-credentials: ${{ secrets.YC_KEYS }}
+          container-name: ${{ secrets.YC_CONTAINER_NAME }}
+          folder-id: ${{ secrets.YC_FOLDER_ID }}
+          revision-image-url: cr.yandex/${{ secrets.YC_REGISTRY_ID }}/user-service:${{ github.sha }}
+          revision-service-account-id: ${{ secrets.YC_SA_ID }}
+          public: true
+          revision-cores: 1
+          revision-core-fraction: 20
+          revision-memory: 512Mb
+          revision-concurrency: 4
+          revision-execution-timeout: 30
+          revision-env: |
+            POSTGRES_URL=${{ secrets.ENV_POSTGRES_URL }}
+            AMQP_URL=${{ secrets.ENV_AMQP_URL }}
+            ENVIRONMENT=yandex-cloud
+      - name: Smoke test
+        run: |
+          URL=https://${{ steps.deploy.outputs.id }}.containers.yandexcloud.net
+          for _ in $(seq 1 10); do
+            curl --fail --silent "$URL/health" && exit 0
+            sleep 5   # холодный старт бессерверного контейнера
+          done
+          exit 1
+
+  cleanup:
+    # образы-артефакты большие (~100 МБ каждый) и после доставки не нужны
+    name: cleanup artifacts
+    needs: [e2e, push-ghcr, push-dockerhub, push-yc]
+    if: always()
+    runs-on: ubuntu-latest
+    permissions:
+      actions: write
+    steps:
+      - uses: geekyeggo/delete-artifact@v5
+        with:
+          name: image-*
+          failOnError: false

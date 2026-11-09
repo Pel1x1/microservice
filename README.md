@@ -1,4 +1,4 @@
-# Маркетплейс автозапчастей — ПР5–8 «Микросервисная архитектура»
+# Маркетплейс автозапчастей — ПР5–10 «Микросервисная архитектура»
 
 ИКБО-65-23: Начинкин И.С., Гидаятов К.Г., Киселев К.С., Сошнин Н.А.
 
@@ -7,7 +7,9 @@
 | `pr5-rabbitmq/` | ПР5: RabbitMQ, задания 1 и 2: отдельное решение на каждого участника |
 | `user-service/`, `store-service/`, `catalog-service/`, `inventory-service/`, `order-service/`, `payment-service/`, `delivery-service/`, `review-service/` | ПР7: восемь микросервисов из ПР4 (FastAPI, PostgreSQL, RabbitMQ) |
 | `docker-compose.yaml` | ПР7: запуск всей системы одной командой |
-| `*/tests/` + `.github/workflows/ci-cd.yml` | ПР8: unit- и интеграционные тесты, CI/CD |
+| `*/tests/` | ПР8: unit- и интеграционные тесты |
+| `.github/workflows/ci-cd.yml`, `deploy/yandex-cloud/` | ПР9: CI/CD — тесты, сборка, e2e, доставка в GHCR и DockerHub, Serverless Containers |
+| `*/app/observability.py`, `observability/`, `tools/observability_check.py` | ПР10: метрики (Prometheus + Grafana), логи (Loki + Promtail), трассировка (Jaeger + OpenTelemetry) |
 
 ## ПР5
 У каждого участника своё решение в `pr5-rabbitmq/<фамилия>/` (подробности и таблица вариантов —
@@ -74,5 +76,31 @@ pytest tests/unit
 docker run -d --name pg-tests -e POSTGRES_PASSWORD=password -p 5432:5432 postgres:16
 pytest tests/integration
 ```
-В GitHub Actions тесты запускаются автоматически при каждом push; образы публикуются в GHCR
-только если все тесты прошли.
+## ПР9: CI/CD
+Конвейер `.github/workflows/ci-cd.yml` запускается при каждом push и pull request:
+
+```
+test (8) ──► build (8) ──► e2e ──┬─► push-ghcr (8)        все сервисы → ghcr.io/pel1x1/<сервис>
+                                 ├─► push-dockerhub       order-service → hub.docker.com/r/pel1x1/automarket-order-service
+                                 └─► push-yc ─► deploy-yc user-service → Yandex Cloud Serverless Container
+```
+- `test` — unit- и интеграционные тесты каждого сервиса (PostgreSQL как service container);
+- `build` — `docker build` и `docker save`, образ передаётся дальше артефактом (собирается один раз);
+- `e2e` — вся система поднимается из собранных образов, запускаются `tools/e2e_check.py` и `tools/observability_check.py`;
+- доставка только из `main` и только после всех тестов. DockerHub — секреты `DOCKER_USERNAME`, `DOCKER_PASSWORD`;
+  Яндекс.Облако — секреты `YC_*` и переменная `YC_ENABLED=true` (инструкция и локальная репетиция —
+  `deploy/yandex-cloud/README.md`).
+
+## ПР10: наблюдаемость
+Запускается вместе с системой (`docker compose up --build`):
+
+| Инструмент | Адрес | Что показывает |
+|---|---|---|
+| Grafana | http://localhost:3000 | дашборд «Automarket» (RED, события RabbitMQ, логи), Explore по Loki и Jaeger |
+| Prometheus | http://localhost:9090 | метрики `/metrics` всех сервисов и RabbitMQ, правила оповещений (`/alerts`) |
+| Jaeger | http://localhost:16686 | распределённые трассы: REST → RabbitMQ → подписчики → PostgreSQL |
+| Loki | http://localhost:3100 | JSON-логи сервисов (собирает Promtail через Docker API) |
+
+Если порты 3000/9090 заняты: `GRAFANA_PORT=3001 PROMETHEUS_PORT=9091 docker compose up -d`.
+Проверка: `python tools/e2e_check.py && python tools/observability_check.py`
+(`PROMETHEUS_URL=http://localhost:9091`, если порт изменён).
