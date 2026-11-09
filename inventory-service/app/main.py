@@ -1,3 +1,4 @@
+import asyncio
 import logging
 from contextlib import asynccontextmanager
 
@@ -9,18 +10,33 @@ from app.observability import setup_observability
 from app.schemas.base_schema import Base
 from app.endpoints.stock_router import stock_router, reservation_router
 
+logger = logging.getLogger('automarket')
+
+
+async def consume_with_retry(app: FastAPI) -> None:
+    """Подключение к RabbitMQ в фоне: если брокер ещё не готов, повторяем попытки
+    (1, 2, 4 … 30 с). HTTP API работает и без брокера. После первого подключения
+    обрывы связи обрабатывает connect_robust."""
+    delay = 1
+    while True:
+        try:
+            app.state.amqp = await rabbitmq.consume()
+            return
+        except Exception as e:
+            logger.warning(f'RabbitMQ is unavailable, retry in {delay}s: {e}')
+            await asyncio.sleep(delay)
+            delay = min(delay * 2, 30)
+
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     Base.metadata.create_all(bind=engine)
-    connection = None
-    try:
-        connection = await rabbitmq.consume()
-    except Exception as e:  # HTTP API работает и без брокера
-        logging.getLogger('automarket').warning(f'RabbitMQ is unavailable: {e}')
+    app.state.amqp = None
+    consumer = asyncio.create_task(consume_with_retry(app))
     yield
-    if connection is not None:
-        await connection.close()
+    consumer.cancel()
+    if app.state.amqp is not None:
+        await app.state.amqp.close()
 
 
 app = FastAPI(title='Inventory Service', lifespan=lifespan)

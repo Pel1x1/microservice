@@ -35,7 +35,8 @@ services:
       - 5672:5672       # AMQP
       - 15672:15672     # веб-интерфейс (guest / guest)
     healthcheck:
-      test: rabbitmq-diagnostics -q ping
+      # ping отвечает раньше, чем открыт порт AMQP; проверяем, что порт принимает соединения
+      test: rabbitmq-diagnostics -q check_port_connectivity
       interval: 10s
       timeout: 5s
       retries: 10
