@@ -912,7 +912,7 @@
             "type": "loki",
             "uid": "loki"
           },
-          "expr": "sum by (level) (count_over_time({service=~\"$service\"} [1m]))",
+          "expr": "sum by (level) (count_over_time({service=~\"$service\", level=~\".+\"} [1m]))",
           "legendFormat": "{{level}}"
         }
       ],

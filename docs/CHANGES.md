@@ -126,3 +126,22 @@
 - **Брокер.** Вместо Kafka из ПР4 используется RabbitMQ (как и требует курс).
 - **Внешние системы.** Эквайринг и служба доставки эмулируются командами payment-service (`:confirm`, `:fail`) и delivery-service (`:ship`, `:deliver`).
 - **Авторизация** в сервисах не реализована (в описании API указаны роли, но токены не проверяются).
+
+---
+
+# ПР9–10 (2026-11-09)
+
+| Файл | Что изменено |
+|---|---|
+| `.github/workflows/ci-cd.yml` | Конвейер test → build (образ артефактом) → e2e (вся система из собранных образов + `e2e_check.py` + `observability_check.py`) → push-ghcr, push-dockerhub (order-service), push-yc → deploy-yc (user-service, включается `YC_ENABLED=true`), cleanup. Actions обновлены до версий на Node 24 |
+| `*/app/observability.py` (8 шт.) | **Создан.** Метрики Prometheus (RED + счётчики событий), JSON-логи с trace_id, OpenTelemetry → Jaeger, `GET /health` |
+| `*/app/main.py` | Подключение наблюдаемости; подписчик RabbitMQ подключается в фоне с повторами (раньше при недоступном брокере не запускался совсем) |
+| `*/app/rabbitmq.py`, `*/app/clients/publisher.py` | Логи и счётчики опубликованных/обработанных событий вместо `print` |
+| `*/Dockerfile` | Порт из переменной `PORT` (для Serverless Containers), `--no-access-log` |
+| `*/requirements*.txt` | prometheus-fastapi-instrumentator, OpenTelemetry 1.33.1 / 0.54b1, httpx для тестов |
+| `*/tests/unit/test_observability.py` (8 шт.) | **Создан.** 5 тестов на сервис: формат логов, `/health`, `/metrics`, счётчики. Всего тестов 271 |
+| `docker-compose.yaml` | Имена образов `automarket/<сервис>`, healthcheck сервисов, метка `logging=promtail`, переменные OTel; Prometheus, Grafana, Loki, Promtail, Jaeger; healthcheck RabbitMQ `check_port_connectivity`; порты Grafana/Prometheus настраиваются |
+| `observability/` | **Создан.** prometheus.yml, alerts.yml (5 правил), promtail.yml, provisioning Grafana, дашборд `automarket.json` |
+| `tools/observability_check.py` | **Создан.** 18 проверок метрик, трасс и логов |
+| `deploy/yandex-cloud/` | **Создан.** Инструкция для облака и `yc_local_deploy.sh` — локальная репетиция деплоя |
+| `Отчёт_ПР_№9–10.docx`, `docs/report/screenshots_pr9_10/` | Отчёт и скриншоты |
